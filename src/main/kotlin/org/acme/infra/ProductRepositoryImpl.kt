@@ -19,9 +19,10 @@ class ProductRepositoryImpl(
     private val collection = database.getCollection<Product>("products")
 
     override suspend fun create(product: Product): Product {
-        val productWithId = product.copy(id = ObjectId()) // Ensure ID is generated before insert
-        collection.insertOne(productWithId)
-        return productWithId
+        // Assumes product.id is already set (e.g., by Product's default constructor if not provided by client,
+        // or uses the client-provided ObjectId if it was set in the input 'product' object)
+        collection.insertOne(product)
+        return product
     }
 
     override suspend fun findAll(): List<Product> {

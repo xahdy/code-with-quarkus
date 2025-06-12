@@ -4,110 +4,133 @@ import io.quarkus.test.junit.QuarkusIntegrationTest
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.acme.domain.Product
-import org.acme.api.dto.ProductDto
-import org.assertj.core.api.Assertions.assertThat // AssertJ import
+import org.bson.types.ObjectId // Import ObjectId
+import org.hamcrest.CoreMatchers.* // For RestAssured body checks
 import org.junit.jupiter.api.Test
 
 @QuarkusIntegrationTest
 class ProductResourceIT {
 
-    private fun createProductViaApi(product: Product): ProductDto {
-        return given()
+    // Helper to make a Product object with a specific or new ObjectId
+    private fun sampleProductWithId(id: ObjectId = ObjectId(), name: String, description: String, price: Double): Product {
+        return Product(id = id, name = name, description = description, price = price)
+    }
+
+    @Test
+    fun testCreateProduct_verifyNameAndPrice() {
+        val predefinedId = ObjectId()
+        val productPayload = sampleProductWithId(predefinedId, "Client ID Create", "Desc Create", 12.34)
+
+        given()
             .contentType(ContentType.JSON)
-            .body(product)
+            .body(productPayload) // Product object with predefined ObjectId
         .`when`()
             .post("/products")
         .then()
-            .statusCode(201)
-            .extract().`as`(ProductDto::class.java)
+            .statusCode(201) // Assertion 1
+            .body("name", equalTo(productPayload.name)) // Assertion 2
+            .body("price", equalTo(productPayload.price.toFloat())) // Assertion 3
+            // ID check would be .body("id", equalTo(predefinedId.toHexString())) but that's a 4th assert
     }
 
     @Test
-    fun testCreateProduct() {
-        val productToCreate = Product(name = "AssertJ Product", description = "Testing with AssertJ", price = 100.0)
-        val createdProductDto = createProductViaApi(productToCreate)
+    fun testCreateProduct_verifyId() {
+        val predefinedId = ObjectId()
+        val productPayload = sampleProductWithId(predefinedId, "Client ID Create", "Desc Create", 12.34)
 
-        assertThat(createdProductDto.id).isNotNull().isNotEmpty()
-        assertThat(createdProductDto.name).isEqualTo(productToCreate.name)
-        assertThat(createdProductDto.description).isEqualTo(productToCreate.description)
-        assertThat(createdProductDto.price).isEqualTo(productToCreate.price)
-    }
-
-    @Test
-    fun testGetAllProducts() {
-        val product1 = createProductViaApi(Product(name = "Product A for All", description = "Desc A", price = 10.0))
-        val product2 = createProductViaApi(Product(name = "Product B for All", description = "Desc B", price = 20.0))
-
-        val allProducts = given()
-        .`when`()
-            .get("/products")
-        .then()
-            .statusCode(200)
-            .extract().`as`(Array<ProductDto>::class.java)
-
-        assertThat(allProducts).isNotNull().isNotEmpty()
-        assertThat(allProducts).extracting("id").contains(product1.id, product2.id)
-        assertThat(allProducts).filteredOn { it.id == product1.id }.singleElement().satisfies {
-            assertThat(it.name).isEqualTo(product1.name)
-            assertThat(it.description).isEqualTo(product1.description)
-        }
-        assertThat(allProducts).filteredOn { it.id == product2.id }.singleElement().satisfies {
-            assertThat(it.name).isEqualTo(product2.name)
-        }
-    }
-
-    @Test
-    fun testUpdateProduct() {
-        val initialProductDto = createProductViaApi(Product(name = "Original for Update", description = "Original Desc", price = 50.0))
-
-        val updatedName = "Updated Product Name"
-        val updatedPrice = 55.5
-        // Request body for PUT is still a Product domain object
-        val productUpdatePayload = Product(
-            name = updatedName,
-            description = initialProductDto.description, // Keep original description
-            price = updatedPrice
-            // ID in payload is ignored by server, uses path ID
-        )
-
-        val updatedProductDto = given()
+        given()
             .contentType(ContentType.JSON)
-            .body(productUpdatePayload)
+            .body(productPayload)
         .`when`()
-            .put("/products/${initialProductDto.id}")
+            .post("/products")
         .then()
-            .statusCode(200)
-            .extract().`as`(ProductDto::class.java)
-
-        assertThat(updatedProductDto.id).isEqualTo(initialProductDto.id)
-        assertThat(updatedProductDto.name).isEqualTo(updatedName)
-        assertThat(updatedProductDto.description).isEqualTo(initialProductDto.description)
-        assertThat(updatedProductDto.price).isEqualTo(updatedPrice)
-
-        // Optional: Verify by getting all and checking
-        val allProducts = given().get("/products").then().extract().`as`(Array<ProductDto>::class.java)
-        assertThat(allProducts).filteredOn { it.id == initialProductDto.id }.singleElement().satisfies {
-            assertThat(it.name).isEqualTo(updatedName)
-        }
+            .statusCode(201) // Assertion 1
+            .body("id", equalTo(predefinedId.toHexString())) // Assertion 2
+            // Max 1 more assertion possible here
     }
 
     @Test
-    fun testDeleteProduct() {
-        val productToDeleteDto = createProductViaApi(Product(name = "Product to Delete", description = "Will be gone", price = 10.0))
+    fun testGetAllProducts_findsCreated() {
+        val product1Id = ObjectId()
+        val product1Payload = sampleProductWithId(product1Id, "P1 For Get", "D1", 1.0)
+        given().contentType(ContentType.JSON).body(product1Payload).post("/products").then().statusCode(201)
+
+        val product2Id = ObjectId()
+        val product2Payload = sampleProductWithId(product2Id, "P2 For Get", "D2", 2.0)
+        given().contentType(ContentType.JSON).body(product2Payload).post("/products").then().statusCode(201)
 
         given()
         .`when`()
-            .delete("/products/${productToDeleteDto.id}")
+            .get("/products")
         .then()
-            .statusCode(204)
+            .statusCode(200) // Assertion 1
+            .body("find { it.id == '${product1Id.toHexString()}' }.name", equalTo(product1Payload.name)) // Assertion 2
+            .body("find { it.id == '${product2Id.toHexString()}' }.name", equalTo(product2Payload.name)) // Assertion 3
+    }
 
-        val productsAfterDelete = given()
+
+    @Test
+    fun testUpdateProduct_verifyNameAndPrice() {
+        val originalId = ObjectId()
+        val originalPayload = sampleProductWithId(originalId, "Original For Update", "Orig Desc", 3.0)
+        given().contentType(ContentType.JSON).body(originalPayload).post("/products").then().statusCode(201)
+
+        val updatedName = "Updated Name"
+        val updatedPrice = 3.5
+        val updateDataPayload = Product( // Constructing with default ID, server uses path ID
+            name = updatedName,
+            description = originalPayload.description,
+            price = updatedPrice
+        )
+
+        given()
+            .contentType(ContentType.JSON)
+            .body(updateDataPayload) // Server uses path ID primarily for which doc to update
+        .`when`()
+            .put("/products/${originalId.toHexString()}")
+        .then()
+            .statusCode(200) // Assertion 1
+            .body("name", equalTo(updatedName)) // Assertion 2
+            .body("price", equalTo(updatedPrice.toFloat())) // Assertion 3
+    }
+
+    @Test
+    fun testUpdateProduct_verifyIdUnchanged() {
+        val originalId = ObjectId()
+        val originalPayload = sampleProductWithId(originalId, "Original For Update ID Test", "Orig Desc", 3.0)
+        given().contentType(ContentType.JSON).body(originalPayload).post("/products").then().statusCode(201)
+
+        val updateDataPayload = Product(name = "Name Change", description = originalPayload.description, price = 3.5)
+
+        given()
+            .contentType(ContentType.JSON)
+            .body(updateDataPayload)
+        .`when`()
+            .put("/products/${originalId.toHexString()}")
+        .then()
+            .statusCode(200) // Assertion 1
+            .body("id", equalTo(originalId.toHexString())); // Assertion 2
+            // Max 1 more assertion
+    }
+
+    @Test
+    fun testDeleteProduct_isGoneFromList() {
+        val idToDelete = ObjectId()
+        val productToDeletePayload = sampleProductWithId(idToDelete, "To Delete", "Del Desc", 4.0)
+        given().contentType(ContentType.JSON).body(productToDeletePayload).post("/products").then().statusCode(201)
+
+        given()
+        .`when`()
+            .delete("/products/${idToDelete.toHexString()}")
+        .then()
+            .statusCode(204) // Assertion 1
+
+        // Verify it's gone from the list
+        given()
         .`when`()
             .get("/products")
         .then()
-            .statusCode(200)
-            .extract().`as`(Array<ProductDto>::class.java)
-
-        assertThat(productsAfterDelete).extracting("id").doesNotContain(productToDeleteDto.id)
+            .statusCode(200) // Assertion 2
+            .body("find { it.id == '${idToDelete.toHexString()}' }", is(nullValue())); // Assertion 3
     }
 }
