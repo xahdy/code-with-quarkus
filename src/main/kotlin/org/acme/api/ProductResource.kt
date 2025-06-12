@@ -16,7 +16,7 @@ import org.acme.domain.ProductRepository
 @ApplicationScoped
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-class ProductResource @Inject constructor(private val productRepository: ProductRepository) {
+class ProductResource (private val productRepository: ProductRepository) {
 
     @POST
     suspend fun createProduct(product: Product): Response {
