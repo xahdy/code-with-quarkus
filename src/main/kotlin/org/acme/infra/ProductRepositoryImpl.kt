@@ -23,4 +23,15 @@ class ProductRepositoryImpl(
     override suspend fun findAll(): List<Product> {
         return collection.find().toList()
     }
+
+    override suspend fun update(product: Product): Product? {
+        val updateResult = collection.replaceOneById(product.id!!, product)
+        return if (updateResult.modifiedCount > 0) product else null
+    }
+
+    override suspend fun delete(id: String): Boolean {
+        val objectId = ObjectId(id)
+        val deleteResult = collection.deleteOneById(objectId)
+        return deleteResult.deletedCount > 0
+    }
 }
