@@ -4,152 +4,110 @@ import io.quarkus.test.junit.QuarkusIntegrationTest
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.acme.domain.Product
-import org.acme.api.dto.ProductDto // New import
-import org.hamcrest.CoreMatchers.*
+import org.acme.api.dto.ProductDto
+import org.assertj.core.api.Assertions.assertThat // AssertJ import
 import org.junit.jupiter.api.Test
-// Removed MethodOrderer, Order, and TestMethodOrder imports
 
-@QuarkusIntegrationTest // Changed annotation
+@QuarkusIntegrationTest
 class ProductResourceIT {
 
-    // Original testCreateProduct (state saving removed)
-    @Test
-    fun testCreateProduct() {
-        val newProduct = Product(name = "Test Product", description = "A product for testing", price = 99.99)
-
-        given()
+    private fun createProductViaApi(product: Product): ProductDto {
+        return given()
             .contentType(ContentType.JSON)
-            .body(newProduct) // Send domain Product
+            .body(product)
         .`when`()
             .post("/products")
         .then()
             .statusCode(201)
-            .body("name", equalTo(newProduct.name))
-            .body("description", equalTo(newProduct.description))
-            .body("price", equalTo(newProduct.price.toFloat()))
-            .body("id", notNullValue()) // ID is a string in DTO
-            .body("id", `is`(not(emptyString())))
-            .extract().`as`(ProductDto::class.java) // Expect ProductDto
+            .extract().`as`(ProductDto::class.java)
+    }
+
+    @Test
+    fun testCreateProduct() {
+        val productToCreate = Product(name = "AssertJ Product", description = "Testing with AssertJ", price = 100.0)
+        val createdProductDto = createProductViaApi(productToCreate)
+
+        assertThat(createdProductDto.id).isNotNull().isNotEmpty()
+        assertThat(createdProductDto.name).isEqualTo(productToCreate.name)
+        assertThat(createdProductDto.description).isEqualTo(productToCreate.description)
+        assertThat(createdProductDto.price).isEqualTo(productToCreate.price)
     }
 
     @Test
     fun testGetAllProducts() {
-        // Setup: Create products to ensure the list isn't empty
-        val product1 = Product(name = "Product A for GET", description = "First product for GET test", price = 10.0)
-        val createdProduct1Dto = given()
-            .contentType(ContentType.JSON)
-            .body(product1) // Send domain Product
-        .`when`()
-            .post("/products")
-        .then()
-            .statusCode(201)
-            .extract().`as`(ProductDto::class.java) // Expect ProductDto
+        val product1 = createProductViaApi(Product(name = "Product A for All", description = "Desc A", price = 10.0))
+        val product2 = createProductViaApi(Product(name = "Product B for All", description = "Desc B", price = 20.0))
 
-        val product2 = Product(name = "Product B for GET", description = "Second product for GET test", price = 20.0)
-        val createdProduct2Dto = given()
-            .contentType(ContentType.JSON)
-            .body(product2) // Send domain Product
-        .`when`()
-            .post("/products")
-        .then()
-            .statusCode(201)
-            .extract().`as`(ProductDto::class.java) // Expect ProductDto
-
-        // Act & Assert
-        given()
+        val allProducts = given()
         .`when`()
             .get("/products")
         .then()
             .statusCode(200)
-            .body("$", not(empty<Any>()))
-            // Verify Product 1
-            .body("find { it.id == '${createdProduct1Dto.id}' }.name", equalTo(createdProduct1Dto.name))
-            .body("find { it.id == '${createdProduct1Dto.id}' }.description", equalTo(createdProduct1Dto.description))
-            .body("find { it.id == '${createdProduct1Dto.id}' }.price", equalTo(createdProduct1Dto.price.toFloat()))
-            // Verify Product 2
-            .body("find { it.id == '${createdProduct2Dto.id}' }.name", equalTo(createdProduct2Dto.name))
-            .body("find { it.id == '${createdProduct2Dto.id}' }.description", equalTo(createdProduct2Dto.description))
-            .body("find { it.id == '${createdProduct2Dto.id}' }.price", equalTo(createdProduct2Dto.price.toFloat()))
+            .extract().`as`(Array<ProductDto>::class.java)
+
+        assertThat(allProducts).isNotNull().isNotEmpty()
+        assertThat(allProducts).extracting("id").contains(product1.id, product2.id)
+        assertThat(allProducts).filteredOn { it.id == product1.id }.singleElement().satisfies {
+            assertThat(it.name).isEqualTo(product1.name)
+            assertThat(it.description).isEqualTo(product1.description)
+        }
+        assertThat(allProducts).filteredOn { it.id == product2.id }.singleElement().satisfies {
+            assertThat(it.name).isEqualTo(product2.name)
+        }
     }
 
     @Test
     fun testUpdateProduct() {
-        // Setup: Create a product to update (response is ProductDto)
-        val initialProductPayload = Product(name = "Original Name", description = "Original Desc", price = 50.0)
-        val initialProductAsDto = given()
-            .contentType(ContentType.JSON)
-            .body(initialProductPayload) // Send domain Product
-        .`when`()
-            .post("/products")
-        .then()
-            .statusCode(201)
-            .extract().`as`(ProductDto::class.java) // Expect ProductDto back
+        val initialProductDto = createProductViaApi(Product(name = "Original for Update", description = "Original Desc", price = 50.0))
 
-        val originalIdString = initialProductAsDto.id // This is already a String
-
-        // Prepare updated data - sending a domain Product object still
         val updatedName = "Updated Product Name"
         val updatedPrice = 55.5
-        // The Product sent in PUT body; its ID field is ignored by server due to path param taking precedence.
+        // Request body for PUT is still a Product domain object
         val productUpdatePayload = Product(
             name = updatedName,
-            description = initialProductAsDto.description, // Use description from DTO
+            description = initialProductDto.description, // Keep original description
             price = updatedPrice
-            // id = ObjectId() // Default ObjectId is fine here, or omit if default is handled by data class
+            // ID in payload is ignored by server, uses path ID
         )
 
-        // Act & Assert: Update the product, expect ProductDto back
-        given()
+        val updatedProductDto = given()
             .contentType(ContentType.JSON)
-            .body(productUpdatePayload) // Send domain Product
+            .body(productUpdatePayload)
         .`when`()
-            .put("/products/${originalIdString}") // Use String ID in path
+            .put("/products/${initialProductDto.id}")
         .then()
             .statusCode(200)
-            .body("id", equalTo(originalIdString))
-            .body("name", equalTo(updatedName))
-            .body("description", equalTo(initialProductAsDto.description))
-            .body("price", equalTo(updatedPrice.toFloat()))
-            .extract().`as`(ProductDto::class.java) // Expect ProductDto
+            .extract().`as`(ProductDto::class.java)
 
-        // Optional further verification
-        given()
-        .`when`()
-            .get("/products")
-        .then()
-            .statusCode(200)
-            .body("find { it.id == '${originalIdString}' }.name", equalTo(updatedName))
-            .body("find { it.id == '${originalIdString}' }.price", equalTo(updatedPrice.toFloat()))
+        assertThat(updatedProductDto.id).isEqualTo(initialProductDto.id)
+        assertThat(updatedProductDto.name).isEqualTo(updatedName)
+        assertThat(updatedProductDto.description).isEqualTo(initialProductDto.description)
+        assertThat(updatedProductDto.price).isEqualTo(updatedPrice)
+
+        // Optional: Verify by getting all and checking
+        val allProducts = given().get("/products").then().extract().`as`(Array<ProductDto>::class.java)
+        assertThat(allProducts).filteredOn { it.id == initialProductDto.id }.singleElement().satisfies {
+            assertThat(it.name).isEqualTo(updatedName)
+        }
     }
 
     @Test
     fun testDeleteProduct() {
-        // Setup: Create a product to delete
-        val productToDeletePayload = Product(name = "Product to Delete", description = "This product will be deleted", price = 10.0)
-        val createdProductDto = given()
-            .contentType(ContentType.JSON)
-            .body(productToDeletePayload) // Send domain Product
-        .`when`()
-            .post("/products")
-        .then()
-            .statusCode(201)
-            .extract().`as`(ProductDto::class.java) // Expect ProductDto
+        val productToDeleteDto = createProductViaApi(Product(name = "Product to Delete", description = "Will be gone", price = 10.0))
 
-        val createdProductIdString = createdProductDto.id // ID is already a String
-
-        // Act: Delete the product
         given()
         .`when`()
-            .delete("/products/${createdProductIdString}") // Use String ID
+            .delete("/products/${productToDeleteDto.id}")
         .then()
-            .statusCode(204) // No Content
+            .statusCode(204)
 
-        // Assert: Verify the product is no longer in the list of all products
-        given()
+        val productsAfterDelete = given()
         .`when`()
             .get("/products")
         .then()
             .statusCode(200)
-            .body("find { it.id == '${createdProductIdString}' }", nullValue()) // Use String ID
+            .extract().`as`(Array<ProductDto>::class.java)
+
+        assertThat(productsAfterDelete).extracting("id").doesNotContain(productToDeleteDto.id)
     }
 }
